@@ -1,0 +1,9 @@
+# Test requirements for Azure Synapse Analytics Platform
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-asyncio==0.21.1
+requests==2.31.0
+azure-identity==1.15.0
+azure-mgmt-synapse==2.1.0
+azure-synapse-artifacts==0.17.0
+python-dotenv==1.0.0

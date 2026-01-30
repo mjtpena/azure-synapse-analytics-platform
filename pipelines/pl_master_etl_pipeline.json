@@ -1,0 +1,263 @@
+{
+  "name": "pl_master_etl_pipeline",
+  "properties": {
+    "description": "Master ETL pipeline orchestrating data ingestion, transformation, and loading",
+    "activities": [
+      {
+        "name": "IngestRawData",
+        "type": "ExecutePipeline",
+        "dependsOn": [],
+        "userProperties": [],
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "pl_data_ingestion",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true
+        }
+      },
+      {
+        "name": "TransformData",
+        "type": "SynapseNotebook",
+        "dependsOn": [
+          {
+            "activity": "IngestRawData",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "notebook": {
+            "referenceName": "02_data_transformation",
+            "type": "NotebookReference"
+          },
+          "sparkPool": {
+            "referenceName": "sparkpool",
+            "type": "BigDataPoolReference"
+          },
+          "executorSize": "Small",
+          "driverSize": "Small"
+        }
+      },
+      {
+        "name": "LoadToSQLPool",
+        "type": "SynapseNotebook",
+        "dependsOn": [
+          {
+            "activity": "TransformData",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "notebook": {
+            "referenceName": "03_load_to_sql_pool",
+            "type": "NotebookReference"
+          },
+          "sparkPool": {
+            "referenceName": "sparkpool",
+            "type": "BigDataPoolReference"
+          },
+          "executorSize": "Small",
+          "driverSize": "Small"
+        }
+      },
+      {
+        "name": "UpdateDimensions",
+        "type": "SqlPoolStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "LoadToSQLPool",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "sqlPool": {
+          "referenceName": "EnterpriseDW",
+          "type": "SqlPoolReference"
+        },
+        "typeProperties": {
+          "storedProcedureName": "[dim].[UpdateCustomerSCD]"
+        }
+      },
+      {
+        "name": "AggregateCustomerMetrics",
+        "type": "SqlPoolStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "UpdateDimensions",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "sqlPool": {
+          "referenceName": "EnterpriseDW",
+          "type": "SqlPoolReference"
+        },
+        "typeProperties": {
+          "storedProcedureName": "[fact].[AggregateSalesData]",
+          "storedProcedureParameters": {
+            "StartDate": {
+              "value": {
+                "value": "@formatDateTime(addDays(utcNow(), -30), 'yyyy-MM-dd')",
+                "type": "Expression"
+              },
+              "type": "DateTime"
+            },
+            "EndDate": {
+              "value": {
+                "value": "@formatDateTime(utcNow(), 'yyyy-MM-dd')",
+                "type": "Expression"
+              },
+              "type": "DateTime"
+            }
+          }
+        }
+      },
+      {
+        "name": "CalculateRFMScores",
+        "type": "SqlPoolStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "AggregateCustomerMetrics",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "sqlPool": {
+          "referenceName": "EnterpriseDW",
+          "type": "SqlPoolReference"
+        },
+        "typeProperties": {
+          "storedProcedureName": "[fact].[CalculateCustomerRFM]"
+        }
+      },
+      {
+        "name": "RefreshStatistics",
+        "type": "SqlPoolStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "CalculateRFMScores",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "sqlPool": {
+          "referenceName": "EnterpriseDW",
+          "type": "SqlPoolReference"
+        },
+        "typeProperties": {
+          "storedProcedureName": "[etl].[RefreshStatistics]"
+        }
+      },
+      {
+        "name": "SendSuccessNotification",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "RefreshStatistics",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "url": "https://your-webhook-url/success",
+          "method": "POST",
+          "body": {
+            "pipeline": "@pipeline().Pipeline",
+            "runId": "@pipeline().RunId",
+            "status": "Success",
+            "timestamp": "@utcNow()"
+          }
+        }
+      },
+      {
+        "name": "SendFailureNotification",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "RefreshStatistics",
+            "dependencyConditions": ["Failed"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "url": "https://your-webhook-url/failure",
+          "method": "POST",
+          "body": {
+            "pipeline": "@pipeline().Pipeline",
+            "runId": "@pipeline().RunId",
+            "status": "Failed",
+            "error": "@activity('RefreshStatistics').error.message",
+            "timestamp": "@utcNow()"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "ProcessDate": {
+        "type": "string",
+        "defaultValue": "@formatDateTime(utcNow(), 'yyyy-MM-dd')"
+      }
+    },
+    "folder": {
+      "name": "ETL"
+    }
+  }
+}

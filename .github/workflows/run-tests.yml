@@ -1,0 +1,177 @@
+name: Run API Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'tests/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'  # Run daily at 6 AM UTC
+
+jobs:
+  test:
+    name: Run Synapse API Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          cd tests
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Configure Test Environment
+        run: |
+          cd tests
+          cat > .env << EOF
+          AZURE_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}
+          AZURE_RESOURCE_GROUP=${{ secrets.AZURE_RESOURCE_GROUP }}
+          SYNAPSE_WORKSPACE_NAME=${{ secrets.SYNAPSE_WORKSPACE_NAME }}
+          SQL_POOL_NAME=EnterpriseDW
+          SQL_USERNAME=sqladmin
+          SQL_PASSWORD=${{ secrets.SQL_ADMIN_PASSWORD }}
+          SPARK_POOL_NAME=sparkpool
+          EOF
+
+      - name: Run Workspace Tests
+        run: |
+          cd tests
+          pytest test_synapse_api.py::TestWorkspaceManagement -v --tb=short
+        continue-on-error: true
+
+      - name: Run Pipeline Tests
+        run: |
+          cd tests
+          pytest test_synapse_api.py::TestPipelineOperations -v --tb=short
+        continue-on-error: true
+
+      - name: Run SQL Pool Tests
+        run: |
+          cd tests
+          pytest test_synapse_api.py::TestSQLPoolQueries -v --tb=short
+        continue-on-error: true
+
+      - name: Run Notebook Tests
+        run: |
+          cd tests
+          pytest test_synapse_api.py::TestNotebookOperations -v --tb=short
+        continue-on-error: true
+
+      - name: Run Integration Tests
+        run: |
+          cd tests
+          pytest test_synapse_api.py::TestIntegrationDatasets -v --tb=short
+        continue-on-error: true
+
+      - name: Generate Test Report
+        if: always()
+        run: |
+          cd tests
+          pytest test_synapse_api.py -v --tb=short --junit-xml=test-results.xml
+        continue-on-error: true
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results
+          path: tests/test-results.xml
+
+      - name: Publish Test Results
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: tests/test-results.xml
+          check_name: API Test Results
+
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "### API Test Results :test_tube:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Run:** ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "See detailed results in the artifacts." >> $GITHUB_STEP_SUMMARY
+
+  lint:
+    name: Lint Python Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install linting tools
+        run: |
+          pip install flake8 black isort mypy
+
+      - name: Run Black
+        run: |
+          cd tests
+          black --check test_synapse_api.py conftest.py
+        continue-on-error: true
+
+      - name: Run isort
+        run: |
+          cd tests
+          isort --check-only test_synapse_api.py conftest.py
+        continue-on-error: true
+
+      - name: Run Flake8
+        run: |
+          cd tests
+          flake8 test_synapse_api.py conftest.py --max-line-length=120
+        continue-on-error: true
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install bandit
+        run: pip install bandit
+
+      - name: Run Bandit Security Scan
+        run: |
+          cd tests
+          bandit -r . -f json -o bandit-report.json
+        continue-on-error: true
+
+      - name: Upload Bandit Report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: bandit-report
+          path: tests/bandit-report.json

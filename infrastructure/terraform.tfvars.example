@@ -1,0 +1,17 @@
+# Example Terraform variables file
+# Copy this file to terraform.tfvars and update with your values
+
+resource_group_name         = "rg-synapse-analytics-platform"
+location                    = "eastus"
+workspace_name              = "synapse-analytics-platform"
+sql_administrator_login     = "sqladmin"
+sql_administrator_password  = "YourSecurePassword123!"
+dedicated_sql_pool_sku      = "DW100c"
+spark_pool_node_size        = "Small"
+
+tags = {
+  Environment = "Development"
+  Project     = "Synapse Analytics Platform"
+  ManagedBy   = "Terraform"
+  CostCenter  = "IT"
+}

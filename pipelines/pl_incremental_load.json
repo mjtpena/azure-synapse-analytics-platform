@@ -1,0 +1,170 @@
+{
+  "name": "pl_incremental_load",
+  "properties": {
+    "description": "Incremental data loading pipeline using watermark pattern",
+    "activities": [
+      {
+        "name": "GetLastWatermark",
+        "type": "Lookup",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "source": {
+            "type": "AzureSqlSource",
+            "sqlReaderQuery": "SELECT MAX(WatermarkValue) as LastWatermark FROM etl.Watermark WHERE TableName = '@{pipeline().parameters.TableName}'",
+            "queryTimeout": "02:00:00",
+            "partitionOption": "None"
+          },
+          "dataset": {
+            "referenceName": "ds_sql_control",
+            "type": "DatasetReference"
+          }
+        }
+      },
+      {
+        "name": "GetCurrentWatermark",
+        "type": "Lookup",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "source": {
+            "type": "AzureSqlSource",
+            "sqlReaderQuery": {
+              "value": "SELECT MAX(@{pipeline().parameters.WatermarkColumn}) as CurrentWatermark FROM @{pipeline().parameters.TableName}",
+              "type": "Expression"
+            },
+            "queryTimeout": "02:00:00",
+            "partitionOption": "None"
+          },
+          "dataset": {
+            "referenceName": "ds_source_sales_sqldb",
+            "type": "DatasetReference"
+          }
+        }
+      },
+      {
+        "name": "CopyIncrementalData",
+        "type": "Copy",
+        "dependsOn": [
+          {
+            "activity": "GetLastWatermark",
+            "dependencyConditions": ["Succeeded"]
+          },
+          {
+            "activity": "GetCurrentWatermark",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 3,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "source": {
+            "type": "AzureSqlSource",
+            "sqlReaderQuery": {
+              "value": "SELECT * FROM @{pipeline().parameters.TableName} WHERE @{pipeline().parameters.WatermarkColumn} > '@{activity('GetLastWatermark').output.firstRow.LastWatermark}' AND @{pipeline().parameters.WatermarkColumn} <= '@{activity('GetCurrentWatermark').output.firstRow.CurrentWatermark}'",
+              "type": "Expression"
+            },
+            "queryTimeout": "02:00:00",
+            "partitionOption": "None"
+          },
+          "sink": {
+            "type": "ParquetSink",
+            "storeSettings": {
+              "type": "AzureBlobFSWriteSettings"
+            },
+            "formatSettings": {
+              "type": "ParquetWriteSettings"
+            }
+          },
+          "enableStaging": false
+        },
+        "inputs": [
+          {
+            "referenceName": "ds_source_sales_sqldb",
+            "type": "DatasetReference"
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "ds_bronze_incremental_parquet",
+            "type": "DatasetReference"
+          }
+        ]
+      },
+      {
+        "name": "UpdateWatermark",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "CopyIncrementalData",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "storedProcedureName": "[etl].[UpdateWatermark]",
+          "storedProcedureParameters": {
+            "TableName": {
+              "value": {
+                "value": "@pipeline().parameters.TableName",
+                "type": "Expression"
+              },
+              "type": "String"
+            },
+            "WatermarkValue": {
+              "value": {
+                "value": "@activity('GetCurrentWatermark').output.firstRow.CurrentWatermark",
+                "type": "Expression"
+              },
+              "type": "DateTime"
+            }
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "ls_sql_control",
+          "type": "LinkedServiceReference"
+        }
+      }
+    ],
+    "parameters": {
+      "TableName": {
+        "type": "string",
+        "defaultValue": "Sales"
+      },
+      "WatermarkColumn": {
+        "type": "string",
+        "defaultValue": "ModifiedDate"
+      }
+    },
+    "folder": {
+      "name": "ETL"
+    }
+  }
+}

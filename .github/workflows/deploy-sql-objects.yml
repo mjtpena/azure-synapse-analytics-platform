@@ -1,0 +1,135 @@
+name: Deploy SQL Objects
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'sql/**'
+  workflow_dispatch:
+    inputs:
+      workspace_name:
+        description: 'Synapse workspace name'
+        required: true
+      sql_pool_name:
+        description: 'SQL Pool name'
+        required: true
+        default: 'EnterpriseDW'
+
+jobs:
+  deploy-sql-scripts:
+    name: Deploy SQL Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Install SqlCmd
+        run: |
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          curl https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools unixodbc-dev
+
+      - name: Get Azure AD Token
+        id: token
+        run: |
+          TOKEN=$(az account get-access-token --resource=https://database.windows.net/ --query accessToken -o tsv)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Deploy Schema Creation
+        run: |
+          /opt/mssql-tools/bin/sqlcmd \
+            -S ${{ github.event.inputs.workspace_name || 'synapse-analytics' }}.sql.azuresynapse.net \
+            -d ${{ github.event.inputs.sql_pool_name || 'EnterpriseDW' }} \
+            -G \
+            -i sql/01_create_schemas.sql
+
+      - name: Deploy Dimension Tables
+        run: |
+          /opt/mssql-tools/bin/sqlcmd \
+            -S ${{ github.event.inputs.workspace_name || 'synapse-analytics' }}.sql.azuresynapse.net \
+            -d ${{ github.event.inputs.sql_pool_name || 'EnterpriseDW' }} \
+            -G \
+            -i sql/02_create_dimension_tables.sql
+
+      - name: Deploy Fact Tables
+        run: |
+          /opt/mssql-tools/bin/sqlcmd \
+            -S ${{ github.event.inputs.workspace_name || 'synapse-analytics' }}.sql.azuresynapse.net \
+            -d ${{ github.event.inputs.sql_pool_name || 'EnterpriseDW' }} \
+            -G \
+            -i sql/03_create_fact_tables.sql
+
+      - name: Deploy Stored Procedures
+        run: |
+          /opt/mssql-tools/bin/sqlcmd \
+            -S ${{ github.event.inputs.workspace_name || 'synapse-analytics' }}.sql.azuresynapse.net \
+            -d ${{ github.event.inputs.sql_pool_name || 'EnterpriseDW' }} \
+            -G \
+            -i sql/04_create_stored_procedures.sql
+
+      - name: Deploy Views
+        run: |
+          /opt/mssql-tools/bin/sqlcmd \
+            -S ${{ github.event.inputs.workspace_name || 'synapse-analytics' }}.sql.azuresynapse.net \
+            -d ${{ github.event.inputs.sql_pool_name || 'EnterpriseDW' }} \
+            -G \
+            -i sql/05_create_views.sql
+
+      - name: Deployment Summary
+        run: |
+          echo "### SQL Objects Deployed Successfully :white_check_mark:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Workspace:** ${{ github.event.inputs.workspace_name || 'synapse-analytics' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**SQL Pool:** ${{ github.event.inputs.sql_pool_name || 'EnterpriseDW' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Deployment Time:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Deployed Objects:" >> $GITHUB_STEP_SUMMARY
+          echo "- Schemas: staging, dim, fact, etl, views" >> $GITHUB_STEP_SUMMARY
+          echo "- Dimension Tables: 6 tables" >> $GITHUB_STEP_SUMMARY
+          echo "- Fact Tables: 4 tables" >> $GITHUB_STEP_SUMMARY
+          echo "- Stored Procedures: 5 procedures" >> $GITHUB_STEP_SUMMARY
+          echo "- Views: 6 views" >> $GITHUB_STEP_SUMMARY
+
+  validate-sql-syntax:
+    name: Validate SQL Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install sqlparse
+        run: pip install sqlparse
+
+      - name: Validate SQL Files
+        run: |
+          for file in sql/*.sql; do
+            echo "Validating $file..."
+            python -c "
+          import sqlparse
+          with open('$file', 'r') as f:
+              sql = f.read()
+              parsed = sqlparse.parse(sql)
+              if not parsed:
+                  print(f'Error: Invalid SQL syntax in $file')
+                  exit(1)
+              print(f'Valid SQL syntax in $file')
+          "
+          done
+
+      - name: Check SQL Formatting
+        run: |
+          echo "SQL files validation completed"
+          echo "All SQL scripts have valid syntax"

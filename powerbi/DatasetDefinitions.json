@@ -1,0 +1,226 @@
+{
+  "name": "Synapse Analytics Dataset",
+  "description": "Enterprise data warehouse dataset for reporting and analytics",
+  "tables": [
+    {
+      "name": "Sales",
+      "source": {
+        "type": "m",
+        "expression": "let\n    Source = Sql.Database(\"your-workspace.sql.azuresynapse.net\", \"EnterpriseDW\"),\n    SalesView = Source{[Schema=\"views\",Item=\"vw_SalesSummary\"]}[Data]\nin\n    SalesView"
+      },
+      "columns": [
+        {
+          "name": "SalesDate",
+          "dataType": "dateTime",
+          "formatString": "yyyy-MM-dd"
+        },
+        {
+          "name": "Year",
+          "dataType": "int64"
+        },
+        {
+          "name": "Quarter",
+          "dataType": "int64"
+        },
+        {
+          "name": "MonthName",
+          "dataType": "string"
+        },
+        {
+          "name": "CustomerName",
+          "dataType": "string"
+        },
+        {
+          "name": "ProductName",
+          "dataType": "string"
+        },
+        {
+          "name": "ProductCategory",
+          "dataType": "string"
+        },
+        {
+          "name": "SalesAmount",
+          "dataType": "decimal",
+          "formatString": "\\$#,##0.00"
+        },
+        {
+          "name": "Quantity",
+          "dataType": "int64"
+        },
+        {
+          "name": "GrossProfitAmount",
+          "dataType": "decimal",
+          "formatString": "\\$#,##0.00"
+        }
+      ],
+      "measures": [
+        {
+          "name": "Total Sales",
+          "expression": "SUM(Sales[SalesAmount])",
+          "formatString": "\\$#,##0.00"
+        },
+        {
+          "name": "Total Quantity",
+          "expression": "SUM(Sales[Quantity])",
+          "formatString": "#,##0"
+        },
+        {
+          "name": "Average Order Value",
+          "expression": "DIVIDE([Total Sales], COUNTROWS(Sales))",
+          "formatString": "\\$#,##0.00"
+        },
+        {
+          "name": "Gross Profit Margin %",
+          "expression": "DIVIDE(SUM(Sales[GrossProfitAmount]), SUM(Sales[SalesAmount]))",
+          "formatString": "0.00%"
+        }
+      ]
+    },
+    {
+      "name": "Customer Analytics",
+      "source": {
+        "type": "m",
+        "expression": "let\n    Source = Sql.Database(\"your-workspace.sql.azuresynapse.net\", \"EnterpriseDW\"),\n    CustomerView = Source{[Schema=\"views\",Item=\"vw_CustomerAnalytics\"]}[Data]\nin\n    CustomerView"
+      },
+      "columns": [
+        {
+          "name": "CustomerID",
+          "dataType": "string"
+        },
+        {
+          "name": "CustomerName",
+          "dataType": "string"
+        },
+        {
+          "name": "CustomerSegment",
+          "dataType": "string"
+        },
+        {
+          "name": "CustomerSegmentRFM",
+          "dataType": "string"
+        },
+        {
+          "name": "TotalOrders",
+          "dataType": "int64"
+        },
+        {
+          "name": "LifetimeValue",
+          "dataType": "decimal",
+          "formatString": "\\$#,##0.00"
+        },
+        {
+          "name": "DaysSinceLastPurchase",
+          "dataType": "int64"
+        }
+      ],
+      "measures": [
+        {
+          "name": "Total Customers",
+          "expression": "COUNTROWS('Customer Analytics')",
+          "formatString": "#,##0"
+        },
+        {
+          "name": "Average LTV",
+          "expression": "AVERAGE('Customer Analytics'[LifetimeValue])",
+          "formatString": "\\$#,##0.00"
+        },
+        {
+          "name": "Active Customers",
+          "expression": "CALCULATE(COUNTROWS('Customer Analytics'), 'Customer Analytics'[DaysSinceLastPurchase] <= 90)",
+          "formatString": "#,##0"
+        }
+      ]
+    },
+    {
+      "name": "Product Performance",
+      "source": {
+        "type": "m",
+        "expression": "let\n    Source = Sql.Database(\"your-workspace.sql.azuresynapse.net\", \"EnterpriseDW\"),\n    ProductView = Source{[Schema=\"views\",Item=\"vw_ProductPerformance\"]}[Data]\nin\n    ProductView"
+      },
+      "columns": [
+        {
+          "name": "ProductID",
+          "dataType": "string"
+        },
+        {
+          "name": "ProductName",
+          "dataType": "string"
+        },
+        {
+          "name": "Category",
+          "dataType": "string"
+        },
+        {
+          "name": "SubCategory",
+          "dataType": "string"
+        },
+        {
+          "name": "Brand",
+          "dataType": "string"
+        },
+        {
+          "name": "TotalSalesAmount",
+          "dataType": "decimal",
+          "formatString": "\\$#,##0.00"
+        },
+        {
+          "name": "TotalQuantitySold",
+          "dataType": "int64"
+        },
+        {
+          "name": "GrossProfitMarginPercent",
+          "dataType": "decimal",
+          "formatString": "0.00%"
+        }
+      ]
+    },
+    {
+      "name": "Date",
+      "source": {
+        "type": "m",
+        "expression": "let\n    Source = Sql.Database(\"your-workspace.sql.azuresynapse.net\", \"EnterpriseDW\"),\n    DateDim = Source{[Schema=\"dim\",Item=\"DimDate\"]}[Data]\nin\n    DateDim"
+      },
+      "columns": [
+        {
+          "name": "DateKey",
+          "dataType": "int64"
+        },
+        {
+          "name": "FullDate",
+          "dataType": "dateTime",
+          "formatString": "yyyy-MM-dd"
+        },
+        {
+          "name": "Year",
+          "dataType": "int64"
+        },
+        {
+          "name": "Quarter",
+          "dataType": "int64"
+        },
+        {
+          "name": "MonthName",
+          "dataType": "string"
+        },
+        {
+          "name": "DayName",
+          "dataType": "string"
+        },
+        {
+          "name": "IsWeekend",
+          "dataType": "boolean"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "name": "Sales to Date",
+      "fromTable": "Sales",
+      "fromColumn": "SalesDate",
+      "toTable": "Date",
+      "toColumn": "FullDate",
+      "crossFilteringBehavior": "bothDirections"
+    }
+  ]
+}
