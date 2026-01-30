@@ -194,7 +194,6 @@ resource "azurerm_synapse_spark_pool" "spark_pool" {
   synapse_workspace_id = azurerm_synapse_workspace.synapse.id
   node_size_family     = "MemoryOptimized"
   node_size            = var.spark_pool_node_size
-  node_count           = 3
 
   auto_scale {
     min_node_count = 3
